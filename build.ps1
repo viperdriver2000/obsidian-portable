@@ -141,18 +141,28 @@ Write-Host "Extracting Obsidian..." -ForegroundColor Gray
 $extractTemp = "$DownloadDir\temp_extract"
 Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
 
-# 7z extracts NSIS installers natively. Extract everything, then find app-64.7z
-& $7zExe x "$InstallerPath" -o"$extractTemp" -aoa 2>&1 | Out-Null
+# Extract only app-64.7z from the NSIS installer
+# Note: single-quotes needed because $PLUGINSDIR contains a $ that PowerShell would expand
+$nsisPath = '$PLUGINSDIR/app-64.7z'
+$extractArgs = @('x', $InstallerPath, "-o$extractTemp", $nsisPath, '-aoa')
+$result = & $7zExe $extractArgs 2>&1
+if ($LASTEXITCODE -ne 0) {
+    # Extraction might have failed, try listing contents
+    Write-Host "  Direct extraction failed, trying full extract..." -ForegroundColor Yellow
+    & $7zExe x $InstallerPath "-o$extractTemp" -aoa 2>&1 | Out-Null
+}
 
 $appArchive = Get-ChildItem -Path $extractTemp -Recurse -Filter "app-64.7z" -ErrorAction SilentlyContinue | Select-Object -First 1
 
 if (-not $appArchive) {
-    Write-Host "Could not find app-64.7z in extracted files." -ForegroundColor Yellow
-    # List contents for debugging
-    Write-Host "Installer contents:" -ForegroundColor Gray
-    & $7zExe l "$InstallerPath" 2>&1 | Select-String "app-" | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-    Write-Error "The installer format may have changed. Please report this issue."
+    Write-Host "Could not find app-64.7z." -ForegroundColor Yellow
+    Write-Host "Checking what was extracted..." -ForegroundColor Gray
+    Get-ChildItem -Path $extractTemp -Recurse -Depth 2 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    Write-Host ""
+    Write-Host "Installer file list:" -ForegroundColor Gray
+    & $7zExe l $InstallerPath 2>&1 | Select-String "app-" | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
     Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
+    Write-Error "Cannot extract app-64.7z. Installer format may have changed."
     exit 1
 }
 
@@ -161,7 +171,7 @@ $obsidianTarget = "$PSScriptRoot\$ObsidianDir"
 Remove-Item -Recurse -Force $obsidianTarget -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $obsidianTarget | Out-Null
 
-& $7zExe x $appArchive.FullName -o"$obsidianTarget" -aoa 2>&1 | Out-Null
+& $7zExe x $appArchive.FullName "-o$obsidianTarget" -aoa 2>&1 | Out-Null
 
 # Save installed version
 $Version | Out-File -FilePath "$PSScriptRoot\App\version.txt" -NoNewline -Encoding ascii
