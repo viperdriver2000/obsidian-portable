@@ -5,8 +5,10 @@ App/version.txt
 
 # Downloaded tools
 tools/*.exe
+tools/*.dll
 tools/*.7z
 tools/*.zip
+tools/*.chm
 !tools/.gitkeep
 
 # User data at runtime (keep template only)

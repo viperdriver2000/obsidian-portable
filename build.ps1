@@ -11,7 +11,7 @@ $ProgressPreference = "SilentlyContinue"
 
 $ObsidianDir = "App\Obsidian"
 $ToolsDir = "$PSScriptRoot\tools"
-$7zExe = "$ToolsDir\7z.exe"
+$7zExe = "$ToolsDir\7za.exe"
 $Bootstrap7z = "$ToolsDir\7zr.exe"
 
 Write-Host "=== Obsidian Portable Builder ===" -ForegroundColor Cyan
@@ -58,7 +58,7 @@ if ($needBootstrap) {
     }
     Write-Host "  7zr.exe ready" -ForegroundColor Green
 
-    # Step 2: Download 7-Zip Extra package (contains 7z.exe + 7z.dll with full codec support)
+    # Step 2: Download 7-Zip Extra package (contains 7za.exe + DLLs with full codec support)
     $extra7z = "$ToolsDir\7z-extra.7z"
     if (-not (Test-Path $extra7z)) {
         Write-Host "  Downloading 7-Zip Extra..." -ForegroundColor Gray
@@ -74,37 +74,41 @@ if ($needBootstrap) {
         }
     }
 
-    # Step 3: Use 7zr to extract 7z.exe + 7z.dll from the extra package
-    Write-Host "  Extracting 7z.exe..." -ForegroundColor Gray
+    # Step 3: Use 7zr to extract 7za.exe + DLLs from the extra package
+    # 7zxa.dll contains the NSIS codec - must be extracted alongside 7za.exe!
+    Write-Host "  Extracting 7za.exe + DLLs..." -ForegroundColor Gray
     $extractDir = "$ToolsDir\_extract"
     Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
 
-    # Extract 7z.exe and 7z.dll (7z.exe loads 7z.dll for full format support including NSIS)
-    & $Bootstrap7z x $extra7z -o"$extractDir" "7z.exe" "7z.dll" -aoa 2>&1 | Out-Null
+    # Determine architecture and extract appropriate files
+    if ([Environment]::Is64BitOperatingSystem) {
+        $7zaSourcePath = "x64/7za.exe"
+    } else {
+        $7zaSourcePath = "7za.exe"
+    }
 
-    $extracted7z = "$extractDir\7z.exe"
-    $extractedDll = "$extractDir\7z.dll"
+    # Extract everything needed: 7za.exe, 7za.dll, 7zxa.dll (NSIS codec!)
+    & $Bootstrap7z x $extra7z -o"$extractDir" $7zaSourcePath "7za.dll" "7zxa.dll" -aoa 2>&1 | Out-Null
 
-    if ((Test-Path $extracted7z) -and (Test-Path $extractedDll)) {
-        Move-Item $extracted7z $7zExe -Force
-        Move-Item $extractedDll "$ToolsDir\7z.dll" -Force
+    # Find extracted 7za.exe (might be in x64/ subdir)
+    $extracted7za = Get-ChildItem -Path $extractDir -Recurse -Filter "7za.exe" | Select-Object -First 1
+    
+    if ($extracted7za) {
+        Move-Item $extracted7za.FullName $7zExe -Force
+        
+        # Move DLLs alongside 7za.exe
+        $dllFiles = Get-ChildItem -Path $extractDir -Recurse -Include "7za.dll","7zxa.dll"
+        foreach ($dll in $dllFiles) {
+            Move-Item $dll.FullName "$ToolsDir\$($dll.Name)" -Force
+        }
+        
         Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
         Remove-Item $extra7z -ErrorAction SilentlyContinue
-        Write-Host "  7z.exe + 7z.dll ready" -ForegroundColor Green
+        Write-Host "  7za.exe + DLLs ready" -ForegroundColor Green
     } else {
-        # If 7z.exe not in extras, try extracting 7za.exe as fallback
-        Write-Host "  7z.exe not in extras, trying 7za.exe..." -ForegroundColor Yellow
+        Write-Error "Failed to extract 7za.exe from extras package"
         Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
-        & $Bootstrap7z x $extra7z -o"$extractDir" "7za.exe" -aoa 2>&1 | Out-Null
-        if (Test-Path "$extractDir\7za.exe") {
-            Move-Item "$extractDir\7za.exe" $7zExe -Force
-            Remove-Item $extra7z -ErrorAction SilentlyContinue
-            Write-Host "  7za.exe ready (NSIS support may be limited)" -ForegroundColor DarkYellow
-        } else {
-            Write-Host "  Using 7zr.exe as fallback (7z/LZMA only)" -ForegroundColor DarkYellow
-            $7zExe = $Bootstrap7z
-        }
-        Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+        exit 1
     }
 }
 
