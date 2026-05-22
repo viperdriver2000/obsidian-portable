@@ -1,0 +1,18 @@
+# Obsidian App (downloaded/built)
+App/Obsidian/
+App/Obsidian64/
+
+# User data at runtime (keep template only)
+Data/ObsidianAppData/*
+!Data/ObsidianAppData/obsidian.json
+
+# Downloads
+downloads/
+*.exe
+*.7z
+*.zip
+
+# OS files
+Thumbs.db
+.DS_Store
+Desktop.ini
