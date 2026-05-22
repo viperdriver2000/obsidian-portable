@@ -11,7 +11,7 @@ $ProgressPreference = "SilentlyContinue"
 
 $ObsidianDir = "App\Obsidian"
 $ToolsDir = "$PSScriptRoot\tools"
-$7zExe = "$ToolsDir\7za.exe"
+$7zExe = "$ToolsDir\7z.exe"
 $Bootstrap7z = "$ToolsDir\7zr.exe"
 
 Write-Host "=== Obsidian Portable Builder ===" -ForegroundColor Cyan
@@ -58,7 +58,7 @@ if ($needBootstrap) {
     }
     Write-Host "  7zr.exe ready" -ForegroundColor Green
 
-    # Step 2: Download 7-Zip Extra package (contains 7za.exe)
+    # Step 2: Download 7-Zip Extra package (contains 7z.exe + 7z.dll with full codec support)
     $extra7z = "$ToolsDir\7z-extra.7z"
     if (-not (Test-Path $extra7z)) {
         Write-Host "  Downloading 7-Zip Extra..." -ForegroundColor Gray
@@ -74,21 +74,37 @@ if ($needBootstrap) {
         }
     }
 
-    # Step 3: Use 7zr to extract 7za.exe from the extra package
-    Write-Host "  Extracting 7za.exe..." -ForegroundColor Gray
+    # Step 3: Use 7zr to extract 7z.exe + 7z.dll from the extra package
+    Write-Host "  Extracting 7z.exe..." -ForegroundColor Gray
     $extractDir = "$ToolsDir\_extract"
     Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
-    & $Bootstrap7z x $extra7z -o"$extractDir" 7za.exe -aoa 2>&1 | Out-Null
 
-    if (Test-Path "$extractDir\7za.exe") {
-        Move-Item "$extractDir\7za.exe" $7zExe -Force
+    # Extract 7z.exe and 7z.dll (7z.exe loads 7z.dll for full format support including NSIS)
+    & $Bootstrap7z x $extra7z -o"$extractDir" "7z.exe" "7z.dll" -aoa 2>&1 | Out-Null
+
+    $extracted7z = "$extractDir\7z.exe"
+    $extractedDll = "$extractDir\7z.dll"
+
+    if ((Test-Path $extracted7z) -and (Test-Path $extractedDll)) {
+        Move-Item $extracted7z $7zExe -Force
+        Move-Item $extractedDll "$ToolsDir\7z.dll" -Force
         Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
         Remove-Item $extra7z -ErrorAction SilentlyContinue
-        Write-Host "  7za.exe ready" -ForegroundColor Green
+        Write-Host "  7z.exe + 7z.dll ready" -ForegroundColor Green
     } else {
-        # Fallback: just use 7zr.exe directly
-        Write-Host "  Using 7zr.exe directly as fallback" -ForegroundColor DarkYellow
-        $7zExe = $Bootstrap7z
+        # If 7z.exe not in extras, try extracting 7za.exe as fallback
+        Write-Host "  7z.exe not in extras, trying 7za.exe..." -ForegroundColor Yellow
+        Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+        & $Bootstrap7z x $extra7z -o"$extractDir" "7za.exe" -aoa 2>&1 | Out-Null
+        if (Test-Path "$extractDir\7za.exe") {
+            Move-Item "$extractDir\7za.exe" $7zExe -Force
+            Remove-Item $extra7z -ErrorAction SilentlyContinue
+            Write-Host "  7za.exe ready (NSIS support may be limited)" -ForegroundColor DarkYellow
+        } else {
+            Write-Host "  Using 7zr.exe as fallback (7z/LZMA only)" -ForegroundColor DarkYellow
+            $7zExe = $Bootstrap7z
+        }
+        Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
     }
 }
 
@@ -135,43 +151,63 @@ if (-not (Test-Path $InstallerPath)) {
 }
 
 # ------------------------------------------------------------------
-# Extract app-64.7z from NSIS installer, then extract to App/
+# Extract Obsidian app files from NSIS installer
 # ------------------------------------------------------------------
 Write-Host "Extracting Obsidian..." -ForegroundColor Gray
 $extractTemp = "$DownloadDir\temp_extract"
 Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $extractTemp | Out-Null
 
-# Extract only app-64.7z from the NSIS installer
-# Note: single-quotes needed because $PLUGINSDIR contains a $ that PowerShell would expand
-$nsisPath = '$PLUGINSDIR/app-64.7z'
-$extractArgs = @('x', $InstallerPath, "-o$extractTemp", $nsisPath, '-aoa')
-$result = & $7zExe $extractArgs 2>&1
-if ($LASTEXITCODE -ne 0) {
-    # Extraction might have failed, try listing contents
-    Write-Host "  Direct extraction failed, trying full extract..." -ForegroundColor Yellow
-    & $7zExe x $InstallerPath "-o$extractTemp" -aoa 2>&1 | Out-Null
-}
+# Extract app-64.7z from NSIS installer using 7z
+# Use cmd /c to avoid PowerShell argument parsing issues
+$app7zPath = '$PLUGINSDIR/app-64.7z'
+cmd /c "`"$7zExe`" x `"$InstallerPath`" -o`"$extractTemp`" $app7zPath -aoa" 2>&1 | Out-Null
 
 $appArchive = Get-ChildItem -Path $extractTemp -Recurse -Filter "app-64.7z" -ErrorAction SilentlyContinue | Select-Object -First 1
 
 if (-not $appArchive) {
-    Write-Host "Could not find app-64.7z." -ForegroundColor Yellow
-    Write-Host "Checking what was extracted..." -ForegroundColor Gray
-    Get-ChildItem -Path $extractTemp -Recurse -Depth 2 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-    Write-Host ""
-    Write-Host "Installer file list:" -ForegroundColor Gray
-    & $7zExe l $InstallerPath 2>&1 | Select-String "app-" | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    Write-Host "  Targeted extraction failed. Trying full extract..." -ForegroundColor Yellow
+    # Remove and recreate temp dir
     Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
-    Write-Error "Cannot extract app-64.7z. Installer format may have changed."
-    exit 1
+    New-Item -ItemType Directory -Force -Path $extractTemp | Out-Null
+    
+    cmd /c "`"$7zExe`" x `"$InstallerPath`" -o`"$extractTemp`" -aoa" 2>&1 | Out-Null
+    $appArchive = Get-ChildItem -Path $extractTemp -Recurse -Filter "app-64.7z" -ErrorAction SilentlyContinue | Select-Object -First 1
 }
 
-# Extract app to target
-$obsidianTarget = "$PSScriptRoot\$ObsidianDir"
-Remove-Item -Recurse -Force $obsidianTarget -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $obsidianTarget | Out-Null
+if (-not $appArchive) {
+    Write-Host "  7z extraction failed. Trying silent NSIS install..." -ForegroundColor Yellow
+    Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $extractTemp | Out-Null
+    
+    # Run NSIS installer silently (/S = silent, /D= must be last, no quotes on path)
+    $proc = Start-Process -FilePath $InstallerPath -ArgumentList "/S", "/D=$extractTemp" -Wait -PassThru -NoNewWindow
+    
+    $installedExe = Get-ChildItem -Path $extractTemp -Recurse -Filter "Obsidian.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($installedExe) {
+        $obsidianTarget = "$PSScriptRoot\$ObsidianDir"
+        Remove-Item -Recurse -Force $obsidianTarget -ErrorAction SilentlyContinue
+        $sourceDir = Split-Path -Parent $installedExe.FullName
+        Move-Item -Path $sourceDir -Destination $obsidianTarget
+        Write-Host "  Installed via NSIS" -ForegroundColor Green
+        Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "  Contents of temp dir:" -ForegroundColor Gray
+        Get-ChildItem -Path $extractTemp -Recurse -Depth 1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
+        Write-Error "All extraction methods failed. Please install 7-Zip manually: https://7-zip.org/"
+        exit 1
+    }
+} else {
+    # Extract app-64.7z to target
+    $obsidianTarget = "$PSScriptRoot\$ObsidianDir"
+    Remove-Item -Recurse -Force $obsidianTarget -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $obsidianTarget | Out-Null
 
-& $7zExe x $appArchive.FullName "-o$obsidianTarget" -aoa 2>&1 | Out-Null
+    cmd /c "`"$7zExe`" x `"$($appArchive.FullName)`" -o`"$obsidianTarget`" -aoa" 2>&1 | Out-Null
+    Write-Host "  Extracted via 7z" -ForegroundColor Green
+    Remove-Item -Recurse -Force $extractTemp -ErrorAction SilentlyContinue
+}
 
 # Save installed version
 $Version | Out-File -FilePath "$PSScriptRoot\App\version.txt" -NoNewline -Encoding ascii
