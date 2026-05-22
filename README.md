@@ -2,20 +2,29 @@
 
 Portable version of [Obsidian](https://obsidian.md) — the markdown note-taking app.
 
-All settings, plugins, caches and vaults stay in the portable directory. No traces left on the host system.
+All settings, plugins, caches and vaults stay in the portable directory. No traces left on the host system. **Auto-updates on every launch.**
 
 ## Quick Start
 
 1. **Clone or download** this repo
-2. **Run `ObsidianPortable.bat`** — it auto-downloads and extracts the latest Obsidian version on first launch
+2. **Run `ObsidianPortable.bat`** — it downloads and sets up everything automatically
 3. Your vault is at `Data\Obsidian Vault\`
+
+## Features
+
+- **Auto-update**: Checks for new Obsidian versions on each launch, downloads & updates if found
+- **Auto-install 7-Zip**: Downloads standalone 7za.exe if 7-Zip is not installed
+- **Fully portable**: `--user-data-dir` routes all Electron/Chromium data to `Data/`
+- **Drive letter handling**: Vault paths automatically adapt when USB stick gets a different letter
+- **No dependencies**: Just clone and run. No NSIS, no PortableApps.com Framework needed
 
 ## How It Works
 
-- `ObsidianPortable.bat` — Launcher, sets `--user-data-dir` to `Data\ObsidianAppData\` so all Electron/Chromium data (settings, plugins, caches) stays portable
-- `build.ps1` — Downloads the latest Obsidian from GitHub Releases and extracts it to `App\Obsidian\`
-- Vault paths in `obsidian.json` are automatically updated on each launch (handles drive letter changes for USB sticks)
-- Auto-update is disabled (`updateDisabled: true`) to prevent Obsidian from replacing the portable setup
+| File | Purpose |
+|------|---------|
+| `ObsidianPortable.bat` | Launcher — checks for updates, fixes paths, starts Obsidian |
+| `build.ps1` | Downloads latest Obsidian installer, extracts with 7-Zip |
+| `fix-paths.ps1` | Updates vault paths on launch (placeholder + drive letter changes) |
 
 ## Manual Build
 
@@ -24,21 +33,23 @@ All settings, plugins, caches and vaults stay in the portable directory. No trac
 .\build.ps1 -Version "1.12.7"  # Build specific version
 ```
 
-Requires [7-Zip](https://7-zip.org/) installed.
-
 ## Structure
 
 ```
 obsidian-portable/
 ├── ObsidianPortable.bat    # Launch script
-├── build.ps1               # Download & extract latest Obsidian
-├── App/Obsidian/           # Obsidian application (auto-downloaded)
+├── build.ps1               # Download & extract Obsidian
+├── fix-paths.ps1            # Path fixer
+├── App/
+│   ├── Obsidian/           # Obsidian app (auto-downloaded)
+│   └── version.txt         # Installed version
 ├── Data/
 │   ├── ObsidianAppData/    # User data (settings, plugins, cache)
 │   └── Obsidian Vault/     # Default vault
+├── tools/                  # 7za.exe (auto-downloaded)
 └── downloads/              # Temp downloads (gitignored)
 ```
 
 ## Credits
 
-Based on the original [PortableApps.com ObsidianPortable](https://github.com/xmha97/PortableApps/tree/main/PortableApps/ObsidianPortable) by xmha97. Simplified to a standalone wrapper without NSIS dependencies.
+Based on the original [PortableApps.com ObsidianPortable](https://github.com/xmha97/PortableApps/tree/main/PortableApps/ObsidianPortable) by xmha97. Simplified to a standalone wrapper.

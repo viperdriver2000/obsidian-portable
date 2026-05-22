@@ -1,6 +1,13 @@
 # Obsidian App (downloaded/built)
 App/Obsidian/
 App/Obsidian64/
+App/version.txt
+
+# Downloaded tools
+tools/*.exe
+tools/*.7z
+tools/*.zip
+!tools/.gitkeep
 
 # User data at runtime (keep template only)
 Data/ObsidianAppData/*
